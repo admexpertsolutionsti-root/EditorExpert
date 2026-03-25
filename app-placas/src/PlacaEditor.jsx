@@ -11,7 +11,19 @@ import {
   Link,
   Unlink,
   QrCode,
-  ZoomIn
+  ZoomIn,
+  Save,
+  Upload,
+  FolderOpen,
+  FileText,
+  Monitor,
+  Sliders,
+  RotateCw,
+  FlipHorizontal,
+  FlipVertical,
+  Layers,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 
 // Constantes de dimensões padrão ISO 216 em milímetros
@@ -35,7 +47,7 @@ const DEFAULT_FONTS = [
   { label: 'Georgia', value: 'Georgia, serif' }
 ];
 
-function PlacaEditor() {
+const App = () => {
   // Estados Gerais do Papel e Zoom
   const [paperSize, setPaperSize] = useState('A4');
   const [customPaper, setCustomPaper] = useState({ width: 110, height: 30 }); // Padrão etiqueta de gôndola
@@ -44,7 +56,7 @@ function PlacaEditor() {
   const [bgImage, setBgImage] = useState(null);
   const [bgImageMode, setBgImageMode] = useState('cover');
   const [bgImageOpacity, setBgImageOpacity] = useState(100);
-  const [zoom, setZoom] = useState(1); // Nível inicial do zoom (1 = 100%)
+  const [zoom, setZoom] = useState(1); 
   
   // Estados dos Elementos, Seleção e Fontes Customizadas
   const [elements, setElements] = useState([]);
@@ -53,15 +65,19 @@ function PlacaEditor() {
   const [googleFontInput, setGoogleFontInput] = useState('');
   const [qrInput, setQrInput] = useState(''); 
   
-  // Estado para controlar a exibição das linhas guias
+  // Estados de UI
+  const [showNewConfirm, setShowNewConfirm] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [guides, setGuides] = useState({ centerX: false, centerY: false, elementX: null, elementY: null, edgeX: null, edgeY: null });
+  const [activeMobileView, setActiveMobileView] = useState('controls'); // 'controls' ou 'canvas'
   
   // Refs
   const dragItem = useRef(null);
+  const rotateItem = useRef(null); 
   const paperRef = useRef(null);
   const printAreaRef = useRef(null);
 
-  // Calcula largura e altura ativas em milímetros com base no tipo escolhido
+  // Calcula largura e altura ativas em milímetros
   const getBaseDimensions = () => {
     if (paperSize === 'Custom') return customPaper;
     return PAPER_SIZES[paperSize];
@@ -70,29 +86,187 @@ function PlacaEditor() {
   const baseDims = getBaseDimensions();
   const activeWidth = orientation === 'portrait' ? baseDims.width : baseDims.height;
   const activeHeight = orientation === 'portrait' ? baseDims.height : baseDims.width;
-  
-  // Lógica Avançada de Zoom via Scroll (Wheel)
+
+  // Lógica de Projeto
+  const resetProject = () => {
+    setPaperSize('A4');
+    setCustomPaper({ width: 110, height: 30 });
+    setOrientation('landscape');
+    setBgColor('#ffffff');
+    setBgImage(null);
+    setBgImageMode('cover');
+    setBgImageOpacity(100);
+    setZoom(1);
+    setElements([]);
+    setSelectedIds([]);
+  };
+
+  const handleNewProject = () => {
+    if (elements.length > 0 || bgImage || bgColor !== '#ffffff') {
+      setShowNewConfirm(true);
+    } else {
+      resetProject();
+    }
+  };
+
+  const handleSaveAndNew = () => {
+    handleSaveProject();
+    resetProject();
+    setShowNewConfirm(false);
+  };
+
+  const handleDiscardAndNew = () => {
+    resetProject();
+    setShowNewConfirm(false);
+  };
+
+  const handleSaveProject = () => {
+    const projectData = {
+      paperSize, customPaper, orientation, bgColor,
+      bgImage, bgImageMode, bgImageOpacity,
+      elements, customFonts
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projectData));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "meu_layout.expert");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleLoadProject = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const projectData = JSON.parse(event.target.result);
+        
+        if (projectData.paperSize) setPaperSize(projectData.paperSize);
+        if (projectData.customPaper) setCustomPaper(projectData.customPaper);
+        if (projectData.orientation) setOrientation(projectData.orientation);
+        if (projectData.bgColor) setBgColor(projectData.bgColor);
+        if (projectData.bgImage !== undefined) setBgImage(projectData.bgImage);
+        if (projectData.bgImageMode) setBgImageMode(projectData.bgImageMode);
+        if (projectData.bgImageOpacity !== undefined) setBgImageOpacity(projectData.bgImageOpacity);
+        if (projectData.elements) setElements(projectData.elements);
+        
+        if (projectData.customFonts) {
+          setCustomFonts(projectData.customFonts);
+          projectData.customFonts.forEach(font => {
+            const formattedName = font.label.replace(/\s+/g, '+');
+            const link = document.createElement('link');
+            link.href = `https://fonts.googleapis.com/css2?family=${formattedName}:wght@400;700;900&display=swap`;
+            link.rel = 'stylesheet';
+            document.head.appendChild(link);
+          });
+        }
+        
+        setSelectedIds([]); 
+        setZoom(1); 
+        setActiveMobileView('canvas'); 
+      } catch (err) {
+        console.error("Ops! O arquivo selecionado não é um projeto válido.", err);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; 
+  };
+
+  // Lógica de Gerenciamento de Camadas (Z-Index Reordering)
+  const moveLayer = (id, direction) => {
+    setElements(prev => {
+      const index = prev.findIndex(el => el.id === id);
+      if (index < 0) return prev;
+      
+      const newElements = [...prev];
+      
+      // Trazer para frente (sobe no array)
+      if (direction === 'up' && index < prev.length - 1) {
+        [newElements[index], newElements[index + 1]] = [newElements[index + 1], newElements[index]];
+      }
+      // Enviar para trás (desce no array)
+      else if (direction === 'down' && index > 0) {
+        [newElements[index], newElements[index - 1]] = [newElements[index - 1], newElements[index]];
+      }
+      
+      return newElements;
+    });
+  };
+
+  // Drag and Drop do Windows
+  const handleDragOver = (e) => e.preventDefault();
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) setIsDraggingOver(true);
+  };
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget)) setIsDraggingOver(false);
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      const imageFiles = files.filter(file => file.type.startsWith('image/'));
+      if (imageFiles.length === 0) return;
+
+      const newIds = [];
+      const newElementsToAdd = [];
+
+      imageFiles.forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const newElement = {
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+            type: 'image',
+            src: event.target.result,
+            name: file.name, // <-- Extrai e salva o nome original do arquivo arrastado
+            x: 50 + (index * 2),
+            y: 50 + (index * 2),
+            width: 30,
+            opacity: 100,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1
+          };
+          newElementsToAdd.push(newElement);
+          newIds.push(newElement.id);
+          
+          if (newElementsToAdd.length === imageFiles.length) {
+            setElements(prev => [...prev, ...newElementsToAdd]);
+            setSelectedIds(newIds);
+            setActiveMobileView('canvas'); 
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
+  // Zoom via Scroll
   useEffect(() => {
     const area = printAreaRef.current;
     if (!area) return;
 
     const handleWheel = (e) => {
-      // Ignora o zoom se o usuário estiver rolando em algum menu, foca apenas se estiver fora (ctrl key ou livre)
-      // Permite o shift para scroll horizontal nativo
       if (!e.shiftKey) {
         e.preventDefault();
-        // Fator suave de aproximação (-0.002 garante transição perfeita e não violenta)
         const zoomChange = e.deltaY * -0.002;
-        setZoom(z => Math.max(0.2, Math.min(z + zoomChange, 10))); // Permite zoom de 20% até 1000%
+        setZoom(z => Math.max(0.2, Math.min(z + zoomChange, 10))); 
       }
     };
 
-    // { passive: false } é obrigatório para podermos dar e.preventDefault() no scroll nativo do navegador
     area.addEventListener('wheel', handleWheel, { passive: false });
     return () => area.removeEventListener('wheel', handleWheel);
   }, []);
 
-  // Estilo de impressão dinâmico - Bloqueia o Zoom no momento de ir pro papel!
+  // Estilo de Impressão Dinâmico
   useEffect(() => {
     const style = document.createElement('style');
     style.innerHTML = `
@@ -105,7 +279,7 @@ function PlacaEditor() {
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
-        #app-sidebar, #app-header {
+        #app-sidebar, #app-header, #mobile-nav {
           display: none !important;
         }
         #print-area {
@@ -120,7 +294,6 @@ function PlacaEditor() {
           background: none !important;
         }
         .canvas-container {
-          /* No modo de impressão, usamos !important para anular o Zoom e devolver a folha para medidas reais exatas */
           width: ${activeWidth}mm !important;
           height: ${activeHeight}mm !important;
           max-width: none !important;
@@ -136,7 +309,7 @@ function PlacaEditor() {
     return () => document.head.removeChild(style);
   }, [activeWidth, activeHeight]);
 
-  // Evento Global de Teclado (Nudge com Setas)
+  // Teclado (Nudge)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (['input', 'textarea'].includes(e.target.tagName.toLowerCase())) return;
@@ -172,19 +345,22 @@ function PlacaEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds]);
 
-  // Manipuladores de Imagem de Fundo
+  // Upload Imagem de Fundo
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => setBgImage(event.target.result);
+      reader.onload = (event) => {
+        setBgImage(event.target.result);
+        setActiveMobileView('canvas'); 
+      };
       reader.readAsDataURL(file);
     }
   };
 
   const removeImage = () => setBgImage(null);
 
-  // Inserir Imagem Solta
+  // Inserir Imagem Solta via Botão
   const handleAddImageElement = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -194,41 +370,50 @@ function PlacaEditor() {
           id: Date.now().toString(),
           type: 'image',
           src: event.target.result,
+          name: file.name, // <-- Extrai o nome do arquivo
           x: 50,
           y: 50,
           width: 30,
-          opacity: 100
+          opacity: 100,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1
         };
         setElements(prev => [...prev, newElement]);
         setSelectedIds([newElement.id]);
+        setActiveMobileView('canvas'); 
       };
       reader.readAsDataURL(file);
     }
     e.target.value = '';
   };
 
-  // Gerar QR Code via API Externa
+  // Gerar QR Code
   const handleAddQRCode = () => {
     if (!qrInput.trim()) return;
-    
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qrInput.trim())}`;
     
     const newElement = {
       id: Date.now().toString(),
       type: 'image',
       src: qrUrl,
+      name: 'QR Code Gerado', // <-- Define um nome amigável para a camada
       x: 50,
       y: 50,
       width: 20, 
-      opacity: 100
+      opacity: 100,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1
     };
     
     setElements(prev => [...prev, newElement]);
     setSelectedIds([newElement.id]);
     setQrInput(''); 
+    setActiveMobileView('canvas'); 
   };
 
-  // Importar Google Font
+  // Importar Fonte
   const handleImportGoogleFont = () => {
     if (!googleFontInput.trim()) return;
     const fontName = googleFontInput.trim();
@@ -248,7 +433,7 @@ function PlacaEditor() {
     }
   };
 
-  // Manipuladores de Texto e Elementos
+  // Adicionar Texto
   const addText = () => {
     const newElement = {
       id: Date.now().toString(),
@@ -260,10 +445,14 @@ function PlacaEditor() {
       color: '#000000',
       fontWeight: 'bold',
       fontFamily: 'Arial, sans-serif',
-      opacity: 100
+      opacity: 100,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1
     };
     setElements([...elements, newElement]);
     setSelectedIds([newElement.id]);
+    setActiveMobileView('canvas'); 
   };
 
   const updateSelectedElements = (updates) => {
@@ -275,7 +464,6 @@ function PlacaEditor() {
     setSelectedIds([]);
   };
 
-  // Lógica de Agrupamento
   const handleGroupElements = () => {
     const groupId = Date.now().toString();
     updateSelectedElements({ groupId });
@@ -285,7 +473,7 @@ function PlacaEditor() {
     updateSelectedElements({ groupId: undefined });
   };
 
-  // Drag and Drop Logic com Suporte a Grupos e Multi-seleção
+  // Drag and Drop Logic (Canvas)
   const handleMouseDown = (e, id) => {
     if (['input', 'textarea'].includes(e.target.tagName.toLowerCase())) return; 
     
@@ -390,7 +578,6 @@ function PlacaEditor() {
     let snapEdgeX = null, snapEdgeY = null;
     const SNAP_THRESHOLD = 2; 
 
-    // Eixo X
     let minDx = SNAP_THRESHOLD;
     let targetX = newGroupCenterX;
     let draggedLeft = newGroupCenterX - (groupBounds.widthPct / 2);
@@ -432,7 +619,6 @@ function PlacaEditor() {
 
     const finalDeltaX = targetX - groupBounds.centerX;
 
-    // Eixo Y
     let minDy = SNAP_THRESHOLD;
     let targetY = newGroupCenterY;
     let draggedTop = newGroupCenterY - (groupBounds.heightPct / 2);
@@ -502,6 +688,57 @@ function PlacaEditor() {
     document.removeEventListener('mouseup', handleMouseUp);
   };
 
+  // ==== LÓGICA DE ROTAÇÃO NO CANVAS ====
+  const handleRotateMouseDown = (e, id) => {
+    e.stopPropagation(); 
+    
+    const element = elements.find(el => el.id === id);
+    if (!element) return;
+
+    const elementNode = document.querySelector(`[data-id="${id}"]`);
+    if (!elementNode) return;
+    
+    const rect = elementNode.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    rotateItem.current = {
+      id,
+      centerX,
+      centerY,
+      startAngle: element.rotation || 0,
+    };
+
+    document.addEventListener('mousemove', handleRotateMouseMove);
+    document.addEventListener('mouseup', handleRotateMouseUp);
+  };
+
+  const handleRotateMouseMove = (e) => {
+    if (!rotateItem.current) return;
+    const { id, centerX, centerY } = rotateItem.current;
+
+    const dx = e.clientX - centerX;
+    const dy = e.clientY - centerY;
+    
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    angle = angle - 90; 
+    if (angle < 0) angle += 360;
+    
+    if (e.shiftKey) {
+      angle = Math.round(angle / 45) * 45;
+    } else {
+      angle = Math.round(angle);
+    }
+
+    setElements(prev => prev.map(el => el.id === id ? { ...el, rotation: angle } : el));
+  };
+
+  const handleRotateMouseUp = () => {
+    rotateItem.current = null;
+    document.removeEventListener('mousemove', handleRotateMouseMove);
+    document.removeEventListener('mouseup', handleRotateMouseUp);
+  };
+
   const handlePrint = () => {
     setSelectedIds([]);
     setTimeout(() => {
@@ -519,15 +756,79 @@ function PlacaEditor() {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row font-sans text-gray-800">
       
+      {/* Modal Personalizado de Confirmação Novo Projeto */}
+      {showNewConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity">
+          <div className="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full m-4 transform scale-100">
+            <div className="mb-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Criar Novo Projeto?</h3>
+              <p className="text-sm text-gray-600">
+                Você possui alterações na prancheta. Deseja salvar o seu design atual antes de iniciar uma nova folha em branco?
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={handleSaveAndNew} 
+                className="w-full py-2.5 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold shadow-sm transition"
+              >
+                Salvar Projeto e Continuar
+              </button>
+              <button 
+                onClick={handleDiscardAndNew} 
+                className="w-full py-2.5 px-4 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 text-sm font-semibold transition"
+              >
+                Descartar Tudo
+              </button>
+              <button 
+                onClick={() => setShowNewConfirm(false)} 
+                className="w-full py-2 px-4 bg-transparent text-gray-500 rounded-lg hover:bg-gray-100 text-sm font-medium transition"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar / Controles */}
-      <aside id="app-sidebar" className="w-full md:w-80 shrink-0 bg-white border-r border-gray-200 p-6 flex flex-col shadow-lg z-10 overflow-y-auto h-screen relative">
+      <aside 
+        id="app-sidebar" 
+        className={`w-full md:w-80 shrink-0 bg-white border-r border-gray-200 p-6 flex flex-col shadow-lg z-10 overflow-y-auto h-screen relative pb-24 md:pb-6 ${activeMobileView === 'controls' ? 'flex' : 'hidden md:flex'}`}
+      >
         <div className="flex items-center gap-2 mb-6 text-blue-600">
           <Palette className="w-8 h-8" />
           <h1 className="text-2xl font-bold">EditorExpert</h1>
         </div>
 
-        {/* Configurações da Folha */}
+        {/* PROJETOS: Novo, Salvar e Carregar */}
         <section className="mb-6">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <FolderOpen className="w-4 h-4" /> Projeto
+          </h2>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={handleNewProject}
+              className="py-2 px-2 bg-emerald-50 text-emerald-700 rounded-md font-medium border border-emerald-200 hover:bg-emerald-100 flex flex-col items-center justify-center gap-1 transition text-xs"
+              title="Iniciar uma prancheta em branco"
+            >
+              <FileText className="w-4 h-4" /> Novo
+            </button>
+            <button
+              onClick={handleSaveProject}
+              className="py-2 px-2 bg-indigo-50 text-indigo-700 rounded-md font-medium border border-indigo-200 hover:bg-indigo-100 flex flex-col items-center justify-center gap-1 transition text-xs"
+              title="Baixar projeto atual para o computador"
+            >
+              <Save className="w-4 h-4" /> Salvar
+            </button>
+            <label className="py-2 px-2 bg-white text-gray-700 rounded-md font-medium border border-gray-300 hover:bg-gray-50 flex flex-col items-center justify-center gap-1 transition text-xs cursor-pointer" title="Abrir um arquivo .expert">
+              <Upload className="w-4 h-4" /> Abrir
+              <input type="file" accept=".expert,.json" className="hidden" onChange={handleLoadProject} />
+            </label>
+          </div>
+        </section>
+
+        {/* Configurações da Folha */}
+        <section className="mb-6 border-t border-gray-200 pt-6">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
             <Settings2 className="w-4 h-4" /> Formato da Folha
           </h2>
@@ -548,7 +849,7 @@ function PlacaEditor() {
               </button>
             ))}
             <button
-              onClick={() => { setPaperSize('Custom'); setZoom(2.5); }} // Aplica zoom auto pra etiqueta personalizada
+              onClick={() => { setPaperSize('Custom'); setZoom(2.5); }} 
               className={`py-2 rounded text-sm font-medium border transition-colors flex flex-col items-center justify-center ${
                 paperSize === 'Custom' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-300 hover:bg-gray-50'
               }`}
@@ -716,6 +1017,67 @@ function PlacaEditor() {
           </div>
         </section>
 
+        {/* Painel de Camadas (Z-Index Manager) COM NÚMEROS E NOMES */}
+        {elements.length > 0 && (
+          <section className="mb-6 border-t border-gray-200 pt-6">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Layers className="w-4 h-4" /> Camadas
+            </h2>
+            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto pr-1">
+              {/* O array original é renderizado de baixo para cima, então revertemos visualmente para o item do topo ficar em 1º na lista */}
+              {[...elements].reverse().map((el, reversedIndex) => {
+                const actualIndex = elements.length - 1 - reversedIndex;
+                const isSelected = selectedIds.includes(el.id);
+                const layerNumber = actualIndex + 1; // O número da camada visual
+                
+                return (
+                  <div 
+                    key={el.id} 
+                    className={`flex items-center justify-between p-2 rounded border cursor-pointer transition ${
+                      isSelected ? 'bg-blue-100 border-blue-300 shadow-sm' : 'bg-white border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => { setSelectedIds([el.id]); setActiveMobileView('canvas'); }}
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden flex-1" title={el.name || el.content}>
+                       {/* Etiqueta Numérica da Camada */}
+                       <span className="bg-gray-200 text-gray-700 text-[10px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0">
+                         {layerNumber}
+                       </span>
+                       
+                       {el.type === 'text' ? <Type className="w-3.5 h-3.5 text-gray-500 shrink-0"/> : <ImageIcon className="w-3.5 h-3.5 text-gray-500 shrink-0"/>}
+                       
+                       {/* Nome da camada dinâmico (com o nome do arquivo se existir) */}
+                       <span className="truncate whitespace-nowrap text-gray-700 font-medium text-xs">
+                         {el.type === 'text' ? (el.content || 'Texto Vazio') : (el.name || 'Imagem')}
+                       </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                       {/* Botão de Subir Camada (no array significa ir para o final) */}
+                       <button 
+                         onClick={(e) => { e.stopPropagation(); moveLayer(el.id, 'up'); }} 
+                         disabled={actualIndex === elements.length - 1} 
+                         className="p-1 hover:bg-white bg-gray-100 border border-gray-200 rounded disabled:opacity-30 transition"
+                         title="Trazer para frente"
+                       >
+                         <ChevronUp className="w-3 h-3" />
+                       </button>
+                       {/* Botão de Descer Camada (no array significa ir para o começo) */}
+                       <button 
+                         onClick={(e) => { e.stopPropagation(); moveLayer(el.id, 'down'); }} 
+                         disabled={actualIndex === 0} 
+                         className="p-1 hover:bg-white bg-gray-100 border border-gray-200 rounded disabled:opacity-30 transition"
+                         title="Enviar para trás"
+                       >
+                         <ChevronDown className="w-3 h-3" />
+                       </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Editor de Multi-Seleção / Grupos */}
         {isMultiSelect && (
           <section className="bg-fuchsia-50 p-4 rounded-xl border border-fuchsia-200 mb-4 shrink-0 shadow-sm">
@@ -863,8 +1225,43 @@ function PlacaEditor() {
                 </div>
               )}
 
+              {/* Controles de Transformação (Rotação e Espelhamento) */}
+              <div className="pt-3 border-t border-blue-100">
+                <label className="text-xs font-semibold text-blue-700 block mb-2">Transformação</label>
+                <div className="flex items-center gap-3 mb-3">
+                  <RotateCw className="w-4 h-4 text-blue-500" />
+                  <input 
+                    type="range" min="0" max="360" step="1" 
+                    value={selectedElement.rotation || 0} 
+                    onChange={(e) => updateSelectedElements({ rotation: parseInt(e.target.value) })}
+                    className="flex-1 accent-blue-600"
+                  />
+                  <input 
+                    type="number" min="0" max="360" 
+                    value={selectedElement.rotation || 0} 
+                    onChange={(e) => updateSelectedElements({ rotation: parseInt(e.target.value) })}
+                    className="w-14 text-xs p-1 border border-blue-200 rounded outline-none text-center font-mono"
+                  />
+                  <span className="text-xs font-bold text-blue-600">°</span>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => updateSelectedElements({ scaleX: (selectedElement.scaleX || 1) === 1 ? -1 : 1 })}
+                    className={`flex-1 py-1.5 border rounded flex items-center justify-center gap-2 text-xs transition ${selectedElement.scaleX === -1 ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-blue-200 text-blue-700 hover:bg-blue-50'}`}
+                  >
+                    <FlipHorizontal className="w-3.5 h-3.5" /> Inverter H.
+                  </button>
+                  <button 
+                    onClick={() => updateSelectedElements({ scaleY: (selectedElement.scaleY || 1) === 1 ? -1 : 1 })}
+                    className={`flex-1 py-1.5 border rounded flex items-center justify-center gap-2 text-xs transition ${selectedElement.scaleY === -1 ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-blue-200 text-blue-700 hover:bg-blue-50'}`}
+                  >
+                    <FlipVertical className="w-3.5 h-3.5" /> Inverter V.
+                  </button>
+                </div>
+              </div>
+
               {/* Controle Comum: Opacidade */}
-              <div className="pt-2 border-t border-blue-100">
+              <div className="pt-3 border-t border-blue-100">
                 <label className="text-xs font-semibold text-blue-700 flex justify-between mb-1">
                   <span>Opacidade (Transparência)</span>
                   <span>{selectedElement.opacity !== undefined ? selectedElement.opacity : 100}%</span>
@@ -886,44 +1283,57 @@ function PlacaEditor() {
             @by expertsolutionsti
           </span>
         </div>
-
       </aside>
 
       {/* Área Principal / Visualização */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-gray-200">
+      <main 
+        className={`flex-1 flex flex-col h-screen overflow-hidden bg-gray-200 relative pb-16 md:pb-0 ${activeMobileView === 'canvas' ? 'flex' : 'hidden md:flex'}`}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Overlay Animado para Drag and Drop de Arquivos */}
+        {isDraggingOver && (
+          <div className="absolute inset-0 z-[200] bg-blue-500/20 backdrop-blur-sm border-8 border-blue-500 border-dashed m-4 rounded-3xl flex flex-col items-center justify-center pointer-events-none transition-all">
+            <ImagePlus className="w-24 h-24 text-blue-600 mb-6 animate-bounce drop-shadow-md" />
+            <h2 className="text-4xl font-extrabold text-blue-800 drop-shadow-sm mb-2">Solte a imagem aqui!</h2>
+            <p className="text-lg text-blue-700 font-medium bg-white/50 px-6 py-2 rounded-full">
+              Ela será adicionada automaticamente ao seu design.
+            </p>
+          </div>
+        )}
         
         {/* Header / Ações da Prancheta */}
-        <header id="app-header" className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-10 shrink-0">
-          <div className="flex items-center gap-6">
-            <div className="text-sm text-gray-500">
-              Folha: <strong className="text-gray-800">{paperSize === 'Custom' ? 'Personalizado' : paperSize}</strong> ({activeWidth} x {activeHeight} mm)
+        <header id="app-header" className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-6 shadow-sm z-10 shrink-0">
+          <div className="flex items-center gap-4 md:gap-6">
+            <div className="text-xs md:text-sm text-gray-500">
+              Folha: <strong className="text-gray-800">{paperSize === 'Custom' ? 'Pers.' : paperSize}</strong> <span className="hidden md:inline">({activeWidth} x {activeHeight} mm)</span>
             </div>
 
             {/* Componente Gráfico de Controle do Zoom */}
-            <div className="flex items-center gap-3 border-l border-gray-300 pl-6">
+            <div className="flex items-center gap-2 md:gap-3 border-l border-gray-300 pl-4 md:pl-6">
               <ZoomIn className="w-4 h-4 text-gray-400" />
               <input 
                 type="range" min="0.2" max="10" step="0.1" 
                 value={zoom} 
                 onChange={(e) => setZoom(parseFloat(e.target.value))}
-                className="w-24 accent-blue-600"
+                className="w-16 md:w-24 accent-blue-600 cursor-pointer"
                 title="Use o scroll do mouse para ajustar livremente"
               />
-              <span className="text-xs font-bold text-blue-600 w-10">{Math.round(zoom * 100)}%</span>
+              <span className="text-[10px] md:text-xs font-bold text-blue-600 w-8">{Math.round(zoom * 100)}%</span>
             </div>
-
-            {isMultiSelect && <span className="px-2 py-0.5 bg-fuchsia-100 text-fuchsia-700 rounded text-xs font-bold shadow-sm">Shift Ativo (Múltiplos)</span>}
           </div>
 
           <button 
             onClick={handlePrint}
-            className="py-2 px-6 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 flex items-center gap-2 shadow-md transition transform hover:-translate-y-0.5"
+            className="py-1.5 px-3 md:py-2 md:px-6 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 flex items-center gap-2 shadow-md transition transform hover:-translate-y-0.5 text-xs md:text-sm"
           >
-            <Printer className="w-5 h-5" /> Imprimir / Salvar
+            <Printer className="w-4 h-4 md:w-5 md:h-5" /> <span className="hidden md:inline">Imprimir / Salvar</span>
           </button>
         </header>
 
-        {/* Container da Prancheta (Canvas) com Captura de Scroll Inteligente */}
+        {/* Container da Prancheta (Canvas) */}
         <div 
           id="print-area" 
           ref={printAreaRef}
@@ -937,7 +1347,6 @@ function PlacaEditor() {
             style={{
               aspectRatio: `${activeWidth} / ${activeHeight}`,
               backgroundColor: bgColor,
-              // O grande truque de arquitetura: escalonamos fisicamente na visualização para ativar o scroll natural
               height: `calc((100vh - 8rem) * ${zoom})`,
               maxHeight: `${activeHeight * zoom}mm`,
               overflow: 'hidden',
@@ -969,28 +1378,31 @@ function PlacaEditor() {
             {guides.edgeY !== null && <div className="absolute left-0 right-0 h-0 border-t border-dashed border-emerald-500 z-50 pointer-events-none" style={{ top: `${guides.edgeY}%`, transform: 'translateY(-50%)' }} />}
 
             {/* Elementos na Folha */}
-            {elements.map((el) => {
+            {elements.map((el, index) => {
               const fontSizeMm = (el.fontSize || 72) * 0.352778;
               const fontSizeCqw = (fontSizeMm / activeWidth) * 100;
               const isSelected = selectedIds.includes(el.id);
+              const flipStyle = { transform: `scale(${el.scaleX || 1}, ${el.scaleY || 1})` };
 
               return (
                 <div
                   key={el.id}
                   data-id={el.id}
-                  className={`element-node absolute group cursor-move transform -translate-x-1/2 -translate-y-1/2 ${
+                  className={`element-node absolute group cursor-move ${
                     isSelected ? 'ring-2 ring-blue-500 bg-blue-500/10' : 'hover:ring-1 hover:ring-transparent'
                   }`}
                   style={{
                     left: `${el.x}%`,
                     top: `${el.y}%`,
+                    transform: `translate(-50%, -50%) rotate(${el.rotation || 0}deg)`,
                     width: el.type === 'image' ? `${el.width}%` : 'max-content',
                     color: el.color,
                     fontSize: el.type === 'text' ? `${fontSizeCqw}cqw` : undefined, 
                     fontWeight: el.fontWeight,
                     fontFamily: el.fontFamily,
                     opacity: el.opacity !== undefined ? el.opacity / 100 : 1,
-                    zIndex: isSelected ? 20 : 10,
+                    // ==== LÓGICA DE Z-INDEX INTELIGENTE ====
+                    zIndex: isSelected ? elements.length + 100 : index,
                     padding: '2px',
                   }}
                   onMouseDown={(e) => handleMouseDown(e, el.id)}
@@ -1001,6 +1413,18 @@ function PlacaEditor() {
                       <Move className="w-3 h-3" />
                     </div>
                   )}
+                  
+                  {/* Ícone (Handle) de rotação na prancheta */}
+                  {(isSelected && selectedIds.length === 1) && (
+                    <div 
+                      className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-white text-blue-600 rounded-full p-1.5 shadow-md z-20 cursor-grab border border-gray-200 hover:bg-blue-50"
+                      onMouseDown={(e) => handleRotateMouseDown(e, el.id)}
+                      title="Segure Shift para travar os ângulos"
+                    >
+                      <RotateCw className="w-3 h-3" />
+                    </div>
+                  )}
+
                   {/* Ícone de grupo pequeno se estiver agrupado */}
                   {el.groupId && !isSelected && (
                     <div className="absolute -bottom-2 -right-2 bg-fuchsia-100 text-fuchsia-600 rounded-full p-0.5 shadow-sm z-20 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1008,34 +1432,48 @@ function PlacaEditor() {
                     </div>
                   )}
                   
-                  {el.type === 'text' ? (
-                    <span 
-                      className="whitespace-pre-wrap text-center select-none block leading-tight pointer-events-none"
-                    >
-                      {el.content}
-                    </span>
-                  ) : el.type === 'image' ? (
-                    <img 
-                      src={el.src} 
-                      alt="Elemento Visual" 
-                      draggable="false" 
-                      className="w-full h-auto pointer-events-none select-none block"
-                    />
-                  ) : null}
+                  {/* Conteúdo com suporte a espelhamento */}
+                  <div style={flipStyle} className="w-full h-full">
+                    {el.type === 'text' ? (
+                      <span className="whitespace-pre-wrap text-center select-none block leading-tight pointer-events-none">
+                        {el.content}
+                      </span>
+                    ) : el.type === 'image' ? (
+                      <img 
+                        src={el.src} 
+                        alt="Elemento Visual" 
+                        draggable="false" 
+                        className="w-full h-auto pointer-events-none select-none block"
+                      />
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
       </main>
+
+      {/* ==== MENU INFERIOR MOBILE ==== */}
+      <div id="mobile-nav" className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center p-2 z-[100] pb-safe shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+        <button
+          onClick={() => setActiveMobileView('controls')}
+          className={`flex flex-col items-center p-2 flex-1 rounded-lg transition-colors ${activeMobileView === 'controls' ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
+        >
+          <Sliders className="w-5 h-5 mb-1" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Ferramentas</span>
+        </button>
+        <button
+          onClick={() => setActiveMobileView('canvas')}
+          className={`flex flex-col items-center p-2 flex-1 rounded-lg transition-colors ${activeMobileView === 'canvas' ? 'text-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
+        >
+          <Monitor className="w-5 h-5 mb-1" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Prancheta</span>
+        </button>
+      </div>
+
     </div>
   );
 }
 
-export default function App() {
-  return (
-    <div className="w-full h-screen">
-      <PlacaEditor />
-    </div>
-  );
-}
+export default App;
