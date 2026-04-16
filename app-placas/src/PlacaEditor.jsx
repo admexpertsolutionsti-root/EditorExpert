@@ -23,7 +23,9 @@ import {
   FlipVertical,
   Layers,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Square,
+  Copy // <-- Importação do ícone de Copiar
 } from 'lucide-react';
 
 // Constantes de dimensões padrão ISO 216 em milímetros
@@ -58,26 +60,26 @@ const App = () => {
   const [bgImageOpacity, setBgImageOpacity] = useState(100);
   const [zoom, setZoom] = useState(1); 
   
-  // Estados dos Elementos, Seleção e Fontes Customizadas
+  // Estados dos Elementos, Seleção e Fontes Personalizadas
   const [elements, setElements] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [customFonts, setCustomFonts] = useState([]);
   const [googleFontInput, setGoogleFontInput] = useState('');
   const [qrInput, setQrInput] = useState(''); 
   
-  // Estados de UI
+  // Estados de Interface
   const [showNewConfirm, setShowNewConfirm] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [guides, setGuides] = useState({ centerX: false, centerY: false, elementX: null, elementY: null, edgeX: null, edgeY: null });
   const [activeMobileView, setActiveMobileView] = useState('controls'); // 'controls' ou 'canvas'
   
-  // Refs
+  // Referências
   const dragItem = useRef(null);
   const rotateItem = useRef(null); 
   const paperRef = useRef(null);
   const printAreaRef = useRef(null);
 
-  // Calcula largura e altura ativas em milímetros
+  // Calcula largura e altura activas em milímetros
   const getBaseDimensions = () => {
     if (paperSize === 'Custom') return customPaper;
     return PAPER_SIZES[paperSize];
@@ -87,7 +89,7 @@ const App = () => {
   const activeWidth = orientation === 'portrait' ? baseDims.width : baseDims.height;
   const activeHeight = orientation === 'portrait' ? baseDims.height : baseDims.width;
 
-  // Lógica de Projeto
+  // Lógica de Projecto
   const resetProject = () => {
     setPaperSize('A4');
     setCustomPaper({ width: 110, height: 30 });
@@ -169,14 +171,14 @@ const App = () => {
         setZoom(1); 
         setActiveMobileView('canvas'); 
       } catch (err) {
-        console.error("Ops! O arquivo selecionado não é um projeto válido.", err);
+        console.error("Ups! O ficheiro seleccionado não é um projecto válido.", err);
       }
     };
     reader.readAsText(file);
     e.target.value = ''; 
   };
 
-  // Lógica de Gerenciamento de Camadas (Z-Index Reordering)
+  // Lógica de Gestão de Camadas (Z-Index Reordering)
   const moveLayer = (id, direction) => {
     setElements(prev => {
       const index = prev.findIndex(el => el.id === id);
@@ -184,7 +186,7 @@ const App = () => {
       
       const newElements = [...prev];
       
-      // Trazer para frente (sobe no array)
+      // Trazer para a frente (sobe no array)
       if (direction === 'up' && index < prev.length - 1) {
         [newElements[index], newElements[index + 1]] = [newElements[index + 1], newElements[index]];
       }
@@ -197,7 +199,43 @@ const App = () => {
     });
   };
 
-  // Drag and Drop do Windows
+  // ==== NOVO: Lógica de Duplicação (Copiar) ====
+  const handleDuplicate = () => {
+    if (selectedIds.length === 0) return;
+
+    const elementsToDuplicate = elements.filter(el => selectedIds.includes(el.id));
+    const newIds = [];
+    const groupMap = {}; // Mapa para manter agrupamentos novos e separados
+
+    const duplicatedElements = elementsToDuplicate.map(el => {
+      const newId = Date.now().toString() + Math.random().toString(36).substring(2, 9);
+      newIds.push(newId);
+
+      let newGroupId = el.groupId;
+      if (el.groupId) {
+        if (!groupMap[el.groupId]) {
+          // Cria um novo ID de grupo para as cópias
+          groupMap[el.groupId] = Date.now().toString() + Math.random().toString(36).substring(2, 9);
+        }
+        newGroupId = groupMap[el.groupId];
+      }
+
+      return {
+        ...el,
+        id: newId,
+        groupId: newGroupId,
+        x: Math.min(el.x + 3, 100), // Desloca 3% para o lado para não sobrepor perfeitamente
+        y: Math.min(el.y + 3, 100), // Desloca 3% para baixo
+        name: el.name ? `${el.name} (Cópia)` : el.name // Adiciona tag de Cópia
+      };
+    });
+
+    setElements(prev => [...prev, ...duplicatedElements]);
+    setSelectedIds(newIds);
+  };
+  // ==============================================
+
+  // Arrastar e Largar (Drag and Drop) do Windows
   const handleDragOver = (e) => e.preventDefault();
   const handleDragEnter = (e) => {
     e.preventDefault();
@@ -226,7 +264,7 @@ const App = () => {
             id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
             type: 'image',
             src: event.target.result,
-            name: file.name, // <-- Extrai e salva o nome original do arquivo arrastado
+            name: file.name, 
             x: 50 + (index * 2),
             y: 50 + (index * 2),
             width: 30,
@@ -249,7 +287,7 @@ const App = () => {
     }
   };
 
-  // Zoom via Scroll
+  // Zoom via Scroll do rato
   useEffect(() => {
     const area = printAreaRef.current;
     if (!area) return;
@@ -309,10 +347,18 @@ const App = () => {
     return () => document.head.removeChild(style);
   }, [activeWidth, activeHeight]);
 
-  // Teclado (Nudge)
+  // Teclado (Deslocamento Fino e Atalhos)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (['input', 'textarea'].includes(e.target.tagName.toLowerCase())) return;
+      
+      // Atalho Profissional: Ctrl+D ou Cmd+D para Duplicar
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        handleDuplicate();
+        return;
+      }
+
       if (selectedIds.length === 0) return;
 
       let dx = 0;
@@ -343,7 +389,7 @@ const App = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds]);
+  }, [selectedIds, elements]); // <-- Adicionado elements à dependência para o atalho Ctrl+D funcionar
 
   // Upload Imagem de Fundo
   const handleImageUpload = (e) => {
@@ -370,7 +416,7 @@ const App = () => {
           id: Date.now().toString(),
           type: 'image',
           src: event.target.result,
-          name: file.name, // <-- Extrai o nome do arquivo
+          name: file.name, 
           x: 50,
           y: 50,
           width: 30,
@@ -388,6 +434,27 @@ const App = () => {
     e.target.value = '';
   };
 
+  // Adicionar Forma (Célula/Rectângulo)
+  const addShape = () => {
+    const newElement = {
+      id: Date.now().toString(),
+      type: 'shape',
+      name: 'Forma',
+      x: 50,
+      y: 50,
+      width: 30, 
+      height: 10, 
+      bgColor: '#d8b4e2', 
+      opacity: 100,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1
+    };
+    setElements([...elements, newElement]);
+    setSelectedIds([newElement.id]);
+    setActiveMobileView('canvas'); 
+  };
+
   // Gerar QR Code
   const handleAddQRCode = () => {
     if (!qrInput.trim()) return;
@@ -397,7 +464,7 @@ const App = () => {
       id: Date.now().toString(),
       type: 'image',
       src: qrUrl,
-      name: 'QR Code Gerado', // <-- Define um nome amigável para a camada
+      name: 'QR Code Gerado',
       x: 50,
       y: 50,
       width: 20, 
@@ -473,7 +540,7 @@ const App = () => {
     updateSelectedElements({ groupId: undefined });
   };
 
-  // Drag and Drop Logic (Canvas)
+  // Lógica de Arrastar e Largar (Drag and Drop na Prancheta)
   const handleMouseDown = (e, id) => {
     if (['input', 'textarea'].includes(e.target.tagName.toLowerCase())) return; 
     
@@ -688,7 +755,7 @@ const App = () => {
     document.removeEventListener('mouseup', handleMouseUp);
   };
 
-  // ==== LÓGICA DE ROTAÇÃO NO CANVAS ====
+  // ==== LÓGICA DE ROTAÇÃO NA PRANCHETA ====
   const handleRotateMouseDown = (e, id) => {
     e.stopPropagation(); 
     
@@ -756,14 +823,14 @@ const App = () => {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row font-sans text-gray-800">
       
-      {/* Modal Personalizado de Confirmação Novo Projeto */}
+      {/* Modal Personalizado de Confirmação Novo Projecto */}
       {showNewConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity">
           <div className="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full m-4 transform scale-100">
             <div className="mb-6">
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Criar Novo Projeto?</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Criar Novo Projecto?</h3>
               <p className="text-sm text-gray-600">
-                Você possui alterações na prancheta. Deseja salvar o seu design atual antes de iniciar uma nova folha em branco?
+                Tem alterações na prancheta. Deseja guardar o seu design actual antes de iniciar uma nova folha em branco?
               </p>
             </div>
             <div className="flex flex-col gap-3">
@@ -771,7 +838,7 @@ const App = () => {
                 onClick={handleSaveAndNew} 
                 className="w-full py-2.5 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold shadow-sm transition"
               >
-                Salvar Projeto e Continuar
+                Guardar Projecto e Continuar
               </button>
               <button 
                 onClick={handleDiscardAndNew} 
@@ -790,7 +857,7 @@ const App = () => {
         </div>
       )}
 
-      {/* Sidebar / Controles */}
+      {/* Sidebar / Controlos */}
       <aside 
         id="app-sidebar" 
         className={`w-full md:w-80 shrink-0 bg-white border-r border-gray-200 p-6 flex flex-col shadow-lg z-10 overflow-y-auto h-screen relative pb-24 md:pb-6 ${activeMobileView === 'controls' ? 'flex' : 'hidden md:flex'}`}
@@ -800,10 +867,10 @@ const App = () => {
           <h1 className="text-2xl font-bold">EditorExpert</h1>
         </div>
 
-        {/* PROJETOS: Novo, Salvar e Carregar */}
+        {/* PROJECTOS: Novo, Guardar e Abrir */}
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <FolderOpen className="w-4 h-4" /> Projeto
+            <FolderOpen className="w-4 h-4" /> Projecto
           </h2>
           <div className="grid grid-cols-3 gap-2">
             <button
@@ -816,11 +883,11 @@ const App = () => {
             <button
               onClick={handleSaveProject}
               className="py-2 px-2 bg-indigo-50 text-indigo-700 rounded-md font-medium border border-indigo-200 hover:bg-indigo-100 flex flex-col items-center justify-center gap-1 transition text-xs"
-              title="Baixar projeto atual para o computador"
+              title="Baixar projecto actual para o computador"
             >
-              <Save className="w-4 h-4" /> Salvar
+              <Save className="w-4 h-4" /> Guardar
             </button>
-            <label className="py-2 px-2 bg-white text-gray-700 rounded-md font-medium border border-gray-300 hover:bg-gray-50 flex flex-col items-center justify-center gap-1 transition text-xs cursor-pointer" title="Abrir um arquivo .expert">
+            <label className="py-2 px-2 bg-white text-gray-700 rounded-md font-medium border border-gray-300 hover:bg-gray-50 flex flex-col items-center justify-center gap-1 transition text-xs cursor-pointer" title="Abrir um ficheiro .expert">
               <Upload className="w-4 h-4" /> Abrir
               <input type="file" accept=".expert,.json" className="hidden" onChange={handleLoadProject} />
             </label>
@@ -938,7 +1005,7 @@ const App = () => {
 
                 <div>
                   <label className="text-xs font-semibold text-gray-600 flex justify-between mb-1">
-                    <span>Transparência (Marca D&apos;água)</span>
+                    <span>Transparência (Marca D'água)</span>
                     <span>{bgImageOpacity}%</span>
                   </label>
                   <input 
@@ -967,22 +1034,28 @@ const App = () => {
           <div className="flex gap-2 mb-3">
             <button 
               onClick={addText}
-              className="flex-1 py-2 px-4 bg-gray-800 text-white rounded-md hover:bg-gray-900 flex items-center justify-center gap-2 transition text-sm"
+              className="flex-1 py-2 px-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 flex items-center justify-center gap-1 transition text-xs"
             >
               <Type className="w-4 h-4" /> Texto
             </button>
-            <label className="flex-1 py-2 px-4 bg-gray-800 text-white rounded-md hover:bg-gray-900 flex items-center justify-center gap-2 transition text-sm cursor-pointer">
+            <label className="flex-1 py-2 px-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 flex items-center justify-center gap-1 transition text-xs cursor-pointer">
               <ImagePlus className="w-4 h-4" /> Imagem
               <input type="file" className="hidden" accept="image/*" onChange={handleAddImageElement} />
             </label>
+            <button 
+              onClick={addShape}
+              className="flex-1 py-2 px-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 flex items-center justify-center gap-1 transition text-xs"
+            >
+              <Square className="w-4 h-4" /> Forma
+            </button>
           </div>
 
           <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-             <label className="block text-xs font-semibold text-gray-600 mb-2">Gerar QR Code (Link ou Texto)</label>
+             <label className="block text-xs font-semibold text-gray-600 mb-2">Gerar QR Code</label>
              <div className="flex gap-2">
                <input 
                  type="text" 
-                 placeholder="ex: www.seusite.com.br"
+                 placeholder="ex: www.seusite.pt"
                  value={qrInput}
                  onChange={(e) => setQrInput(e.target.value)}
                  className="flex-1 min-w-0 text-sm p-1.5 border border-gray-300 rounded outline-none focus:ring-1 focus:ring-gray-400"
@@ -1024,11 +1097,10 @@ const App = () => {
               <Layers className="w-4 h-4" /> Camadas
             </h2>
             <div className="flex flex-col gap-1 max-h-48 overflow-y-auto pr-1">
-              {/* O array original é renderizado de baixo para cima, então revertemos visualmente para o item do topo ficar em 1º na lista */}
               {[...elements].reverse().map((el, reversedIndex) => {
                 const actualIndex = elements.length - 1 - reversedIndex;
                 const isSelected = selectedIds.includes(el.id);
-                const layerNumber = actualIndex + 1; // O número da camada visual
+                const layerNumber = actualIndex + 1; 
                 
                 return (
                   <div 
@@ -1039,29 +1111,25 @@ const App = () => {
                     onClick={() => { setSelectedIds([el.id]); setActiveMobileView('canvas'); }}
                   >
                     <div className="flex items-center gap-2 overflow-hidden flex-1" title={el.name || el.content}>
-                       {/* Etiqueta Numérica da Camada */}
                        <span className="bg-gray-200 text-gray-700 text-[10px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0">
                          {layerNumber}
                        </span>
                        
-                       {el.type === 'text' ? <Type className="w-3.5 h-3.5 text-gray-500 shrink-0"/> : <ImageIcon className="w-3.5 h-3.5 text-gray-500 shrink-0"/>}
+                       {el.type === 'text' ? <Type className="w-3.5 h-3.5 text-gray-500 shrink-0"/> : el.type === 'shape' ? <Square className="w-3.5 h-3.5 text-gray-500 shrink-0"/> : <ImageIcon className="w-3.5 h-3.5 text-gray-500 shrink-0"/>}
                        
-                       {/* Nome da camada dinâmico (com o nome do arquivo se existir) */}
                        <span className="truncate whitespace-nowrap text-gray-700 font-medium text-xs">
-                         {el.type === 'text' ? (el.content || 'Texto Vazio') : (el.name || 'Imagem')}
+                         {el.type === 'text' ? (el.content || 'Texto Vazio') : el.type === 'shape' ? (el.name || 'Forma') : (el.name || 'Imagem')}
                        </span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
-                       {/* Botão de Subir Camada (no array significa ir para o final) */}
                        <button 
                          onClick={(e) => { e.stopPropagation(); moveLayer(el.id, 'up'); }} 
                          disabled={actualIndex === elements.length - 1} 
                          className="p-1 hover:bg-white bg-gray-100 border border-gray-200 rounded disabled:opacity-30 transition"
-                         title="Trazer para frente"
+                         title="Trazer para a frente"
                        >
                          <ChevronUp className="w-3 h-3" />
                        </button>
-                       {/* Botão de Descer Camada (no array significa ir para o começo) */}
                        <button 
                          onClick={(e) => { e.stopPropagation(); moveLayer(el.id, 'down'); }} 
                          disabled={actualIndex === 0} 
@@ -1084,11 +1152,16 @@ const App = () => {
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-fuchsia-800 flex items-center gap-1">
                 <Settings2 className="w-4 h-4"/> 
-                Múltiplos Selecionados
+                Múltiplos Seleccionados
               </h2>
-              <button onClick={deleteSelectedElements} className="text-red-500 hover:text-red-700" title="Excluir Seleção">
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={handleDuplicate} className="text-fuchsia-600 hover:text-fuchsia-800" title="Duplicar Seleção">
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button onClick={deleteSelectedElements} className="text-red-500 hover:text-red-700" title="Excluir Selecção">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -1131,11 +1204,16 @@ const App = () => {
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-sm font-bold text-blue-800 flex items-center gap-1">
                 <Settings2 className="w-4 h-4"/> 
-                {selectedElement.type === 'text' ? 'Editar Texto' : 'Editar Imagem'}
+                {selectedElement.type === 'text' ? 'Editar Texto' : selectedElement.type === 'shape' ? 'Editar Forma' : 'Editar Imagem'}
               </h2>
-              <button onClick={deleteSelectedElements} className="text-red-500 hover:text-red-700" title="Excluir Elemento">
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={handleDuplicate} className="text-blue-600 hover:text-blue-800" title="Duplicar Elemento">
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button onClick={deleteSelectedElements} className="text-red-500 hover:text-red-700" title="Excluir Elemento">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             
             <div className="space-y-4">
@@ -1195,7 +1273,7 @@ const App = () => {
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-blue-700 block mb-1">Cor</label>
+                    <label className="text-xs font-semibold text-blue-700 block mb-1">Cor do Texto</label>
                     <div className="flex items-center gap-2">
                       <input 
                         type="color" 
@@ -1209,20 +1287,50 @@ const App = () => {
                 </>
               )}
 
-              {/* Controles Específicos: Imagem */}
-              {selectedElement.type === 'image' && (
+              {/* Controles Específicos: Imagem ou Forma (Largura) */}
+              {(selectedElement.type === 'image' || selectedElement.type === 'shape') && (
                 <div>
                   <label className="text-xs font-semibold text-blue-700 flex justify-between mb-1">
-                    <span>Tamanho da Imagem</span>
+                    <span>Largura</span>
                     <span>{selectedElement.width}%</span>
                   </label>
                   <input 
                     type="range" min="5" max="150" step="1" 
-                    value={selectedElement.width} 
+                    value={selectedElement.width || 30} 
                     onChange={(e) => updateSelectedElements({ width: parseInt(e.target.value) })}
                     className="w-full"
                   />
                 </div>
+              )}
+
+              {/* Controles Específicos: Apenas Forma (Altura e Cor de Fundo) */}
+              {selectedElement.type === 'shape' && (
+                <>
+                  <div>
+                    <label className="text-xs font-semibold text-blue-700 flex justify-between mb-1">
+                      <span>Altura</span>
+                      <span>{selectedElement.height}%</span>
+                    </label>
+                    <input 
+                      type="range" min="1" max="150" step="1" 
+                      value={selectedElement.height || 10} 
+                      onChange={(e) => updateSelectedElements({ height: parseInt(e.target.value) })}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-blue-700 block mb-1">Cor da Forma</label>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="color" 
+                        value={selectedElement.bgColor || '#d8b4e2'} 
+                        onChange={(e) => updateSelectedElements({ bgColor: e.target.value })}
+                        className="w-full h-8 cursor-pointer rounded border border-blue-200 p-0"
+                      />
+                      <span className="text-xs font-mono uppercase text-gray-600">{selectedElement.bgColor || '#d8b4e2'}</span>
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* Controles de Transformação (Rotação e Espelhamento) */}
@@ -1319,7 +1427,7 @@ const App = () => {
                 value={zoom} 
                 onChange={(e) => setZoom(parseFloat(e.target.value))}
                 className="w-16 md:w-24 accent-blue-600 cursor-pointer"
-                title="Use o scroll do mouse para ajustar livremente"
+                title="Utilize o scroll do rato para ajustar livremente"
               />
               <span className="text-[10px] md:text-xs font-bold text-blue-600 w-8">{Math.round(zoom * 100)}%</span>
             </div>
@@ -1329,7 +1437,7 @@ const App = () => {
             onClick={handlePrint}
             className="py-1.5 px-3 md:py-2 md:px-6 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 flex items-center gap-2 shadow-md transition transform hover:-translate-y-0.5 text-xs md:text-sm"
           >
-            <Printer className="w-4 h-4 md:w-5 md:h-5" /> <span className="hidden md:inline">Imprimir / Salvar</span>
+            <Printer className="w-4 h-4 md:w-5 md:h-5" /> <span className="hidden md:inline">Imprimir / Guardar</span>
           </button>
         </header>
 
@@ -1395,13 +1503,15 @@ const App = () => {
                     left: `${el.x}%`,
                     top: `${el.y}%`,
                     transform: `translate(-50%, -50%) rotate(${el.rotation || 0}deg)`,
-                    width: el.type === 'image' ? `${el.width}%` : 'max-content',
+                    // O invólucro (wrapper) adapta-se se for Forma ou Imagem
+                    width: (el.type === 'image' || el.type === 'shape') ? `${el.width}%` : 'max-content',
+                    height: el.type === 'shape' ? `${el.height}%` : 'max-content',
                     color: el.color,
                     fontSize: el.type === 'text' ? `${fontSizeCqw}cqw` : undefined, 
                     fontWeight: el.fontWeight,
                     fontFamily: el.fontFamily,
                     opacity: el.opacity !== undefined ? el.opacity / 100 : 1,
-                    // ==== LÓGICA DE Z-INDEX INTELIGENTE ====
+                    // Z-INDEX INTELIGENTE
                     zIndex: isSelected ? elements.length + 100 : index,
                     padding: '2px',
                   }}
@@ -1419,7 +1529,7 @@ const App = () => {
                     <div 
                       className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-white text-blue-600 rounded-full p-1.5 shadow-md z-20 cursor-grab border border-gray-200 hover:bg-blue-50"
                       onMouseDown={(e) => handleRotateMouseDown(e, el.id)}
-                      title="Segure Shift para travar os ângulos"
+                      title="Mantenha Shift premido para bloquear os ângulos"
                     >
                       <RotateCw className="w-3 h-3" />
                     </div>
@@ -1432,8 +1542,8 @@ const App = () => {
                     </div>
                   )}
                   
-                  {/* Conteúdo com suporte a espelhamento */}
-                  <div style={flipStyle} className="w-full h-full">
+                  {/* Conteúdo dinâmico com base no tipo */}
+                  <div style={flipStyle} className="w-full h-full flex items-center justify-center">
                     {el.type === 'text' ? (
                       <span className="whitespace-pre-wrap text-center select-none block leading-tight pointer-events-none">
                         {el.content}
@@ -1445,6 +1555,8 @@ const App = () => {
                         draggable="false" 
                         className="w-full h-auto pointer-events-none select-none block"
                       />
+                    ) : el.type === 'shape' ? (
+                      <div style={{ width: '100%', height: '100%', backgroundColor: el.bgColor || '#d8b4e2', borderRadius: '2px' }} />
                     ) : null}
                   </div>
                 </div>
